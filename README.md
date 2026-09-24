@@ -15,14 +15,16 @@ A small JSON REST API for managing users. It uses Flask, SQLAlchemy and MySQL 8,
 │   │   └── user.py          # User ORM model
 │   ├── routes/
 │   │   ├── __init__.py      # blueprint registration, /health
+│   │   ├── docs.py          # Swagger UI at /docs
 │   │   └── users.py         # HTTP layer: parse request, call service, shape response
+│   ├── static/
+│   │   └── openapi.yaml     # OpenAPI 3 spec
 │   └── services/
 │       ├── user_service.py  # business logic + DB queries
 │       └── validators.py    # payload / query-param validation
 ├── db/init.sql              # database + table schema
-├── api/index.py             # Vercel serverless entrypoint
+├── docs/screenshots/        # Swagger UI screenshots used in this README
 ├── wsgi.py                  # WSGI entrypoint (gunicorn wsgi:app)
-├── vercel.json              # routes every path to api/index.py
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
@@ -43,6 +45,8 @@ docker compose up --build -d
 docker compose ps           # wait until both services show "healthy"
 curl http://localhost:5000/health
 ```
+
+Then open **http://localhost:5000/docs** to try every endpoint from the browser (Swagger UI).
 
 What happens when you run it:
 
@@ -86,36 +90,6 @@ python wsgi.py                          # dev server on :5000
 # or: gunicorn -b 0.0.0.0:5000 wsgi:app
 ```
 
-### Option 3: Deploy to Vercel
-
-Vercel runs the Flask app as a Python serverless function (`api/index.py`). `vercel.json` sends every path to that function. Vercel doesn't use the Dockerfile and doesn't host MySQL, so the database has to live somewhere else, for example Aiven for MySQL or TiDB Cloud Serverless (MySQL-compatible). Both require TLS, which is what `DB_SSL=true` turns on.
-
-1. Create a hosted MySQL database and note its host, port, user and password.
-2. Create the schema on it:
-   ```bash
-   mysql -h <host> -P <port> -u <user> -p --ssl-mode=REQUIRED < db/init.sql
-   ```
-3. Import the repo in Vercel (Add New → Project), keeping the framework preset as **Other**.
-4. Add the environment variables in Project → Settings → Environment Variables:
-
-   | Variable | Value |
-   |---|---|
-   | `DB_HOST` | host of the hosted database |
-   | `DB_PORT` | its port (`3306` on most providers, `4000` on TiDB Cloud) |
-   | `DB_USER` / `DB_PASSWORD` | its credentials |
-   | `DB_NAME` | `users` |
-   | `DB_SSL` | `true` |
-
-5. Deploy, then check it:
-   ```bash
-   curl https://<your-project>.vercel.app/health
-   curl https://<your-project>.vercel.app/users
-   ```
-
-You can deploy from the terminal instead: `npm i -g vercel`, then `vercel` for a preview deploy and `vercel --prod` for production.
-
-Serverless functions open their own DB connections on cold starts. `pool_pre_ping` drops dead connections, and for this workload that's fine. For heavy traffic I'd put a connection pooler in front of MySQL, or use the container setup above.
-
 ## Database schema
 
 The database is `users` and the table is `users`. See [`db/init.sql`](db/init.sql).
@@ -132,6 +106,8 @@ The table uses the `utf8mb4` charset with the case-insensitive `utf8mb4_unicode_
 ## API
 
 Base URL: `http://localhost:5000`. Every response is JSON.
+
+**Interactive docs:** open `http://localhost:5000/docs` for Swagger UI. It lists every endpoint with its parameters, request body and example responses, and you can send real requests from the page with **Try it out**. The spec it reads is [`app/static/openapi.yaml`](app/static/openapi.yaml).
 
 Successful responses look like this:
 
@@ -154,6 +130,7 @@ Errors look like this:
 | GET | `/users/<id>` | Get one user |
 | POST | `/users` | Create a user |
 | GET | `/health` | Liveness check (used by Docker) |
+| GET | `/docs` | Swagger UI (interactive API docs) |
 
 ### POST /users
 
@@ -266,6 +243,76 @@ curl http://localhost:5000/users/1
 | 405 | Wrong HTTP method |
 | 409 | Duplicate email |
 | 500 | Unexpected server error. The error is logged, and no internals are leaked in the response. |
+
+## Swagger UI screenshots
+
+Every endpoint and every success or error case, run live from `/docs` against MySQL. Each screenshot shows the input, the generated curl command, the status code and the actual response body.
+
+<img src="docs/screenshots/01-swagger-overview.png" alt="Swagger UI overview" width="720">
+
+### POST /users: create a user
+
+**201 Created.** The email is saved lowercase (`Meera.Joshi@Example.com` becomes `meera.joshi@example.com`).
+
+<img src="docs/screenshots/02-create-user-201.png" alt="Create user 201" width="720">
+
+**409 Conflict: duplicate email.** `ALICE@example.com` counts as a duplicate of `alice@example.com`.
+
+<img src="docs/screenshots/03-create-user-409-duplicate-email.png" alt="Duplicate email 409" width="720">
+
+**400 Bad Request: invalid email format.**
+
+<img src="docs/screenshots/04-create-user-400-invalid-email.png" alt="Invalid email 400" width="720">
+
+**400 Bad Request: missing required fields.** Every missing field is reported, not just the first one.
+
+<img src="docs/screenshots/05-create-user-400-missing-fields.png" alt="Missing fields 400" width="720">
+
+**400 Bad Request: body is not valid JSON.**
+
+<img src="docs/screenshots/06-create-user-400-invalid-json.png" alt="Invalid JSON 400" width="720">
+
+### GET /users: list, search and paginate
+
+**200 OK: all users.** No pagination block, because `page` and `limit` weren't passed.
+
+<img src="docs/screenshots/07-list-all-users.png" alt="List all users" width="720">
+
+**200 OK: search** (`?search=sharma`). A partial, case-insensitive match on name or email.
+
+<img src="docs/screenshots/08-search-users.png" alt="Search users" width="720">
+
+**200 OK: pagination** (`?page=2&limit=3`). The response includes `pagination` metadata.
+
+<img src="docs/screenshots/09-paginate-users.png" alt="Paginate users" width="720">
+
+**200 OK: search and pagination together** (`?search=example.com&page=1&limit=2`).
+
+<img src="docs/screenshots/10-search-and-paginate.png" alt="Search and paginate" width="720">
+
+**400 Bad Request: `limit` above 100.**
+
+<img src="docs/screenshots/11-paginate-400-limit-too-large.png" alt="Limit too large 400" width="720">
+
+**400 Bad Request: `page` isn't a positive integer** (`page=0`).
+
+<img src="docs/screenshots/12-paginate-400-invalid-page.png" alt="Invalid page 400" width="720">
+
+### GET /users/{id}: get a user by ID
+
+**200 OK.**
+
+<img src="docs/screenshots/13-get-user-by-id-200.png" alt="Get user by id 200" width="720">
+
+**404 Not Found: user doesn't exist.**
+
+<img src="docs/screenshots/14-get-user-by-id-404.png" alt="User not found 404" width="720">
+
+### GET /health
+
+**200 OK.**
+
+<img src="docs/screenshots/15-health.png" alt="Health check" width="720">
 
 ## Assumptions
 

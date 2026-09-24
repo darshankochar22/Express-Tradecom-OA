@@ -1,0 +1,153 @@
+openapi: 3.0.3
+info:
+  title: User Management API
+  version: 1.0.0
+  description: Flask + MySQL REST API for managing users.
+servers:
+  - url: /
+tags:
+  - name: Users
+  - name: Health
+paths:
+  /users:
+    get:
+      tags: [Users]
+      summary: List, search and paginate users
+      operationId: listUsers
+      description: Returns all users. Pagination applies only when `page` or `limit` is passed.
+      parameters:
+        - name: search
+          in: query
+          required: false
+          description: Partial, case-insensitive match on name or email
+          schema: { type: string }
+        - name: page
+          in: query
+          required: false
+          description: Page number, a positive integer (default 1)
+          schema: { type: integer }
+        - name: limit
+          in: query
+          required: false
+          description: Page size, 1 to 100 (default 10)
+          schema: { type: integer }
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserList" }
+        "400":
+          description: Invalid pagination parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { success: false, error: "limit must not exceed 100" }
+    post:
+      tags: [Users]
+      summary: Create a user
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserCreate" }
+            example: { name: "Alice Sharma", email: "alice@example.com", role: "admin" }
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserResponse" }
+        "400":
+          description: Validation failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example:
+                success: false
+                error: Validation failed
+                details: { email: "Invalid email format" }
+        "409":
+          description: Duplicate email
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { success: false, error: "Email already exists" }
+  /users/{id}:
+    get:
+      tags: [Users]
+      summary: Get a user by ID
+      operationId: getUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: The user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserResponse" }
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { success: false, error: "User not found" }
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness check
+      operationId: health
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              example: { success: true, status: "ok" }
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        name: { type: string, example: "Alice Sharma" }
+        email: { type: string, format: email, example: "alice@example.com" }
+        role: { type: string, example: "admin" }
+    UserCreate:
+      type: object
+      required: [name, email, role]
+      properties:
+        name: { type: string, maxLength: 100 }
+        email: { type: string, format: email, maxLength: 255 }
+        role: { type: string, maxLength: 50 }
+    UserResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        data: { $ref: "#/components/schemas/User" }
+    UserList:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/User" }
+        pagination:
+          type: object
+          description: Present only when page or limit is passed
+          properties:
+            page: { type: integer, example: 1 }
+            limit: { type: integer, example: 10 }
+            total: { type: integer, example: 13 }
+            pages: { type: integer, example: 2 }
+    Error:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        error: { type: string }
+        details:
+          type: object
+          additionalProperties: { type: string }
