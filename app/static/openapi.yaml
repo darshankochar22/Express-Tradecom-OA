@@ -1,20 +1,136 @@
 openapi: 3.0.3
 info:
   title: User Management API
-  version: 1.0.0
-  description: Flask + MySQL REST API for managing users.
+  version: 1.1.0
+  description: |
+    Flask + MySQL REST API for managing users, with JWT authentication and date-of-birth based password reset.
+
+    1. Register with **POST /users**.
+    2. Log in with **POST /auth/login** and copy the `access_token`.
+    3. Click **Authorize** and paste the token to call the protected endpoints.
 servers:
   - url: /
 tags:
+  - name: Auth
   - name: Users
   - name: Health
 paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in and get an access token
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+            example: { email: "alice@example.com", password: "Secret@123" }
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "400":
+          description: Missing email or password
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Wrong email or password
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { success: false, error: "Invalid email or password" }
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the logged-in user
+      operationId: me
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserResponse" }
+        "401":
+          description: Missing, invalid, expired or revoked token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Verify email and date of birth to get a reset token
+      description: |
+        Returns a short-lived, single-use reset token when the email and date of birth match.
+        Unknown emails and wrong dates of birth return the same error.
+        After 5 wrong attempts the account is locked for 15 minutes.
+      operationId: forgotPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ForgotPasswordRequest" }
+            example: { email: "alice@example.com", date_of_birth: "1998-04-12" }
+      responses:
+        "200":
+          description: Verified, reset token issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ForgotPasswordResponse" }
+        "400":
+          description: Email and date of birth do not match, or validation failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { success: false, error: "Email and date of birth do not match" }
+        "429":
+          description: Too many failed attempts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { success: false, error: "Too many failed attempts. Try again later." }
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Set a new password using the reset token
+      description: The reset token works once. Resetting also revokes every access token issued before the reset.
+      operationId: resetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetPasswordRequest" }
+            example: { reset_token: "<reset_token from /auth/forgot-password>", new_password: "NewSecret@456" }
+      responses:
+        "200":
+          description: Password changed
+          content:
+            application/json:
+              example: { success: true, message: "Password has been reset. Please log in again." }
+        "400":
+          description: Validation failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Reset token invalid, expired or already used
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { success: false, error: "Token is no longer valid" }
   /users:
     get:
       tags: [Users]
       summary: List, search and paginate users
       operationId: listUsers
-      description: Returns all users. Pagination applies only when `page` or `limit` is passed.
+      description: Returns all users. Pagination applies only when `page` or `limit` is passed. Requires a bearer token.
+      security:
+        - bearerAuth: []
       parameters:
         - name: search
           in: query
@@ -43,16 +159,21 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
               example: { success: false, error: "limit must not exceed 100" }
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     post:
       tags: [Users]
-      summary: Create a user
+      summary: Register a user
       operationId: createUser
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/UserCreate" }
-            example: { name: "Alice Sharma", email: "alice@example.com", role: "admin" }
+            example: { name: "Alice Sharma", email: "alice@example.com", role: "admin", password: "Secret@123", date_of_birth: "1998-04-12" }
       responses:
         "201":
           description: User created
@@ -79,6 +200,8 @@ paths:
       tags: [Users]
       summary: Get a user by ID
       operationId: getUser
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -90,6 +213,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/UserResponse" }
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "404":
           description: User not found
           content:
@@ -108,6 +236,11 @@ paths:
             application/json:
               example: { success: true, status: "ok" }
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
     User:
       type: object
@@ -118,11 +251,13 @@ components:
         role: { type: string, example: "admin" }
     UserCreate:
       type: object
-      required: [name, email, role]
+      required: [name, email, role, password, date_of_birth]
       properties:
         name: { type: string, maxLength: 100 }
         email: { type: string, format: email, maxLength: 255 }
         role: { type: string, maxLength: 50 }
+        password: { type: string, description: "8 to 128 characters" }
+        date_of_birth: { type: string, description: "YYYY-MM-DD, used to verify password resets" }
     UserResponse:
       type: object
       properties:
@@ -143,6 +278,43 @@ components:
             limit: { type: integer, example: 10 }
             total: { type: integer, example: 13 }
             pages: { type: integer, example: 2 }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    LoginResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        data:
+          type: object
+          properties:
+            access_token: { type: string }
+            token_type: { type: string, example: "Bearer" }
+            expires_in: { type: integer, example: 3600 }
+    ForgotPasswordRequest:
+      type: object
+      required: [email, date_of_birth]
+      properties:
+        email: { type: string, format: email }
+        date_of_birth: { type: string, description: "YYYY-MM-DD" }
+    ForgotPasswordResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        data:
+          type: object
+          properties:
+            reset_token: { type: string }
+            expires_in: { type: integer, example: 900 }
+    ResetPasswordRequest:
+      type: object
+      required: [reset_token, new_password]
+      properties:
+        reset_token: { type: string }
+        new_password: { type: string, description: "8 to 128 characters" }
     Error:
       type: object
       properties:
