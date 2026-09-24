@@ -20,7 +20,9 @@ A small JSON REST API for managing users. It uses Flask, SQLAlchemy and MySQL 8,
 │       ├── user_service.py  # business logic + DB queries
 │       └── validators.py    # payload / query-param validation
 ├── db/init.sql              # database + table schema
+├── api/index.py             # Vercel serverless entrypoint
 ├── wsgi.py                  # WSGI entrypoint (gunicorn wsgi:app)
+├── vercel.json              # routes every path to api/index.py
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
@@ -83,6 +85,36 @@ export DB_HOST=localhost DB_PORT=3306 DB_USER=app DB_PASSWORD=app_password DB_NA
 python wsgi.py                          # dev server on :5000
 # or: gunicorn -b 0.0.0.0:5000 wsgi:app
 ```
+
+### Option 3: Deploy to Vercel
+
+Vercel runs the Flask app as a Python serverless function (`api/index.py`). `vercel.json` sends every path to that function. Vercel doesn't use the Dockerfile and doesn't host MySQL, so the database has to live somewhere else, for example Aiven for MySQL or TiDB Cloud Serverless (MySQL-compatible). Both require TLS, which is what `DB_SSL=true` turns on.
+
+1. Create a hosted MySQL database and note its host, port, user and password.
+2. Create the schema on it:
+   ```bash
+   mysql -h <host> -P <port> -u <user> -p --ssl-mode=REQUIRED < db/init.sql
+   ```
+3. Import the repo in Vercel (Add New → Project), keeping the framework preset as **Other**.
+4. Add the environment variables in Project → Settings → Environment Variables:
+
+   | Variable | Value |
+   |---|---|
+   | `DB_HOST` | host of the hosted database |
+   | `DB_PORT` | its port (`3306` on most providers, `4000` on TiDB Cloud) |
+   | `DB_USER` / `DB_PASSWORD` | its credentials |
+   | `DB_NAME` | `users` |
+   | `DB_SSL` | `true` |
+
+5. Deploy, then check it:
+   ```bash
+   curl https://<your-project>.vercel.app/health
+   curl https://<your-project>.vercel.app/users
+   ```
+
+You can deploy from the terminal instead: `npm i -g vercel`, then `vercel` for a preview deploy and `vercel --prod` for production.
+
+Serverless functions open their own DB connections on cold starts. `pool_pre_ping` drops dead connections, and for this workload that's fine. For heavy traffic I'd put a connection pooler in front of MySQL, or use the container setup above.
 
 ## Database schema
 
@@ -248,33 +280,33 @@ curl http://localhost:5000/users/1
 
 ## Short answers
 
-**1. Why Flask?**
-The scope is a handful of JSON endpoints over one table. Flask lets me build exactly that with little overhead. Blueprints give the routes/models/services split cleanly, and Flask-SQLAlchemy covers the ORM and pagination. Django's admin, templates, auth and migrations framework would mostly go unused here, and DRF would add more ceremony than this API needs. If the project grew into a larger product with admin and auth needs, Django would become the better fit.
+**1. Why did you choose Flask?**
+
+The assignment is basically a few JSON endpoints over a single table, and I wanted the code to stay about that size. With Flask I only pull in what I actually use. That's blueprints for the routes, Flask-SQLAlchemy for the model and pagination, and that's pretty much it. Django is great, but here most of what it gives you out of the box would sit unused: the admin, templates, the auth system and the migrations framework. I'd also end up adding DRF just to return JSON cleanly. If this grew into a bigger product with an admin panel and proper user accounts, I'd seriously consider Django. For this scope, Flask felt like the honest choice.
 
 **2. How would you scale this system?**
-- **App tier**: the API is stateless, so I'd run more gunicorn workers or containers behind a load balancer and scale out horizontally (for example with Kubernetes or ECS).
-- **Database**:
-  - Add read replicas for the read-heavy `GET` traffic.
-  - Tune connection pools, and put ProxySQL in front if connections become the bottleneck.
-  - Switch to keyset (cursor) pagination, `WHERE id > :last_id LIMIT n`, because `OFFSET` gets slow on large tables.
-- **Search**: `LIKE '%term%'` can't use an index. At scale I'd use a MySQL `FULLTEXT` index, or move search to Elasticsearch or OpenSearch.
-- **Caching**: cache hot reads (`GET /users/<id>`) in Redis, and invalidate the entry on writes.
-- **Operations**: rate limiting at the gateway, plus metrics, tracing and alerting so bottlenecks are found from data rather than guesses.
+
+The good news is the API is stateless, so the app side is the easy part. I'd run more containers behind a load balancer and add more as traffic grows. The database is where it would actually hurt first, so most of my effort would go there. Since this API is mostly reads, I'd add read replicas and send the `GET` traffic to them.
+
+A couple of the queries would also need changing as the table grows:
+
+- **Pagination**: `OFFSET` gets slower the deeper you page, so I'd switch to cursor-style pagination (`WHERE id > last_seen_id LIMIT n`).
+- **Search**: `LIKE '%term%'` can't use an index, so I'd move it to a `FULLTEXT` index first, and to something like Elasticsearch if search became a real feature.
+
+On top of that, caching `GET /users/<id>` in Redis would take a lot of load off, and I'd want proper metrics in place. That way I'd be scaling the part that's actually slow rather than guessing.
 
 **3. What changes would you make for production?**
-- **Authentication and authorisation**: JWT or OAuth2, with role-based access control on write endpoints.
-- **Schema migrations**: Alembic / Flask-Migrate instead of a raw init script.
-- **Secrets**: kept in a secrets manager (AWS Secrets Manager, Vault) rather than in `.env`.
-- **Network**: TLS termination at a reverse proxy or load balancer. MySQL wouldn't be exposed publicly, so the `db` port mapping would be removed.
-- **Tests**: automated tests (pytest with a MySQL test container) running in a CI pipeline that also runs lint, tests and the image build.
-- **Observability**:
-  - Structured JSON logging with request IDs.
-  - Prometheus metrics.
-  - Error tracking (Sentry).
-  - A `/health` endpoint split into liveness and readiness checks, where readiness also checks the DB.
-- **API hygiene**: request size limits, rate limiting, CORS policy, and API versioning (`/api/v1`).
-- **Database operations**: managed MySQL (RDS or Cloud SQL) with automated backups and point-in-time recovery.
-- **Images**: pinned image digests and container image vulnerability scanning.
+
+The first thing is security. Right now anyone can create users, so I'd add authentication (JWT, the bonus I skipped) and restrict who can hit the write endpoints. I'd also move the credentials out of `.env` into a proper secrets manager, serve everything over HTTPS, and stop exposing the MySQL port.
+
+After that, the things that make it safe to change and easy to debug:
+
+- **Migrations**: real schema migrations with Alembic instead of a one-off SQL script.
+- **Tests and CI**: an automated test suite that runs in CI on every pull request.
+- **Logging and errors**: structured logs with request IDs, plus error tracking like Sentry, so I hear about problems before users do.
+- **Health checks**: a readiness check that also verifies the database is reachable.
+- **API basics**: rate limiting, request size limits, a CORS policy and versioned URLs (`/api/v1`).
+- **Database**: a managed MySQL with automatic backups, so losing data isn't something I have to think about at 2 a.m.
 
 ## AI usage declaration
 

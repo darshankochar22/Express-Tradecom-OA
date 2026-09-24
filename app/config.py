@@ -1,6 +1,8 @@
 import os
 from urllib.parse import quote_plus
 
+import certifi
+
 
 class Config:
     DB_USER = os.getenv("DB_USER", "app")
@@ -14,6 +16,8 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 280}
+    if os.getenv("DB_SSL", "false").lower() == "true":
+        SQLALCHEMY_ENGINE_OPTIONS["connect_args"] = {"ssl": {"ca": certifi.where()}}
 
     DEFAULT_PAGE_LIMIT = 10
     MAX_PAGE_LIMIT = 100

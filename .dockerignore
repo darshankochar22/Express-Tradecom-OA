@@ -8,3 +8,6 @@ __pycache__
 .pytest_cache
 README.md
 docker-compose.yml
+api
+vercel.json
+.vercelignore
