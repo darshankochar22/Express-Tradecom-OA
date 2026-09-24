@@ -17,7 +17,12 @@ SWAGGER_HTML = """<!doctype html>
   <div id="swagger-ui"></div>
   <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@{version}/swagger-ui-bundle.js"></script>
   <script>
-    SwaggerUIBundle({{ url: "{spec_url}", dom_id: "#swagger-ui", tryItOutEnabled: true }});
+    window.ui = SwaggerUIBundle({{
+      url: "{spec_url}",
+      dom_id: "#swagger-ui",
+      tryItOutEnabled: true,
+      persistAuthorization: true
+    }});
   </script>
 </body>
 </html>"""

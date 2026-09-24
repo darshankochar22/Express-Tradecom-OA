@@ -11,6 +11,9 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
     app.json.sort_keys = False
 
+    if not app.config.get("JWT_SECRET_KEY"):
+        raise RuntimeError("JWT_SECRET_KEY environment variable is not set")
+
     db.init_app(app)
     register_routes(app)
     register_error_handlers(app)

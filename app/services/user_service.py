@@ -48,7 +48,13 @@ def create_user(payload):
     if db.session.scalar(select(User.id).where(User.email == data["email"])):
         raise ConflictError("Email already exists")
 
-    user = User(**data)
+    user = User(
+        name=data["name"],
+        email=data["email"],
+        role=data["role"],
+        date_of_birth=data["date_of_birth"],
+    )
+    user.set_password(data["password"])
     db.session.add(user)
     try:
         db.session.commit()

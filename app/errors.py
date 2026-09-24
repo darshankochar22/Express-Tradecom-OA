@@ -17,12 +17,20 @@ class ValidationError(APIError):
     status_code = 400
 
 
+class UnauthorizedError(APIError):
+    status_code = 401
+
+
 class NotFoundError(APIError):
     status_code = 404
 
 
 class ConflictError(APIError):
     status_code = 409
+
+
+class TooManyRequestsError(APIError):
+    status_code = 429
 
 
 def error_response(message, status_code, details=None):

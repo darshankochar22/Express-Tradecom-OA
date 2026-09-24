@@ -1,5 +1,6 @@
 from flask import Blueprint, current_app, jsonify, request
 
+from app.routes.decorators import jwt_required
 from app.services import user_service
 from app.services.validators import parse_positive_int
 
@@ -7,6 +8,7 @@ users_bp = Blueprint("users", __name__, url_prefix="/users")
 
 
 @users_bp.get("")
+@jwt_required
 def list_users():
     search = request.args.get("search", "").strip() or None
 
@@ -36,6 +38,7 @@ def create_user():
 
 
 @users_bp.get("/<int:user_id>")
+@jwt_required
 def get_user(user_id):
     user = user_service.get_user(user_id)
     return jsonify({"success": True, "data": user.to_dict()}), 200
