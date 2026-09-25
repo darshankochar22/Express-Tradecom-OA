@@ -476,15 +476,34 @@ After that, the things that make it safe to change and easy to debug:
 
 ## AI usage declaration
 
-- **Tools used:** Claude (Anthropic), through Claude Code.
-- **What was AI-generated:** the initial project scaffold, the Flask app factory, the model, service and route code, the validators, the JWT and password-reset flow, the OpenAPI spec, the Dockerfile, the docker-compose file and this README.
-- **What I did or changed manually:**
-  - Reviewed every file and decided on the design choices:
-    - opt-in pagination
-    - lower-cased emails
-    - a `db/init.sql` schema instead of `create_all`
-    - public registration with protected reads
-    - date-of-birth reset with lockout and single-use tokens
-  - Tested every endpoint and error case against a real MySQL-compatible database, both with scripts and through Swagger UI.
-  - Adjusted the configuration, for example URL-encoding the DB password and the TCP-based MySQL healthcheck.
-  - I can explain each part of the implementation.
+**Tools used:** Claude Code (Anthropic).
+
+**How I built it:** I owned the design and the decisions, and I used Claude Code as a pair programmer to write the implementation from them. Every piece was reviewed, tested and adjusted by me before it went in.
+
+**What I decided and drove:**
+
+- **Stack and structure:**
+  - Flask with MySQL.
+  - The routes / services / models layering.
+  - A reviewable `db/init.sql` schema instead of auto-created tables.
+- **API behaviour:**
+  - Opt-in pagination, capped at 100.
+  - Case-insensitive search that treats `%` and `_` literally.
+  - Lower-cased emails.
+  - The `{success, error}` response format.
+- **Docker as the primary way to run it:**
+  - A multi-stage, non-root image.
+  - Healthchecks on both services.
+  - The API waits for a healthy database.
+- **The JWT bonus, extended with a date-of-birth forgot-password flow:**
+  - Single-use reset tokens.
+  - Revoking old tokens after a reset.
+  - The brute-force lockout.
+  - Not revealing whether an account exists.
+- **Swagger UI at `/docs`** for testing, and the screenshot walkthrough of every success and error case in this README.
+- **Deployment:** I tried Vercel and dropped it, because it doesn't use the Dockerfile and needs an external MySQL.
+- **Code style:** clean code with no comments.
+
+**What AI generated (then reviewed by me):** the first draft of the code, the OpenAPI spec, the Docker files and this README, all written from the decisions above.
+
+**Verification:** I tested every endpoint and every error case against a real MySQL-compatible database, with scripted checks and in Swagger UI. I can walk through and explain any part of the implementation.
