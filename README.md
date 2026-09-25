@@ -458,21 +458,39 @@ On top of that, caching `GET /users/<id>` in Redis would take a lot of load off,
 
 **3. What changes would you make for production?**
 
-Security first. The date-of-birth check works for this assignment, but a date of birth isn't really a secret. In production I'd send a one-time reset link or code to the user's email or phone and keep the date of birth as an extra check at most. I'd also:
+First, the code structure. Right now the project is split by layer: one `routes/` folder, one `models/` folder and one `services/` folder. That's fine at this size, but it gets messy as features grow. For production I'd organise it by feature instead. Every domain (users, auth, and whatever comes next) gets its own folder with everything it needs:
 
-- **Login protection**: rate-limit login the same way forgot-password is limited now.
-- **Tokens**: add refresh tokens so access tokens can be shorter-lived.
-- **Permissions**: add role-based permissions once the roles actually mean something.
-- **Secrets and network**: move the JWT secret and DB credentials into a secrets manager, serve everything over HTTPS, and stop exposing the MySQL port.
+```
+app/modules/users/
+├── routes.py        # HTTP endpoints only
+├── model.py         # database model
+├── service.py       # business logic, as a class
+├── middleware.py    # only if the module needs its own (auth checks, rate limits)
+├── constants.py     # limits, messages, enums
+└── types.py         # request/response shapes and type declarations
+```
 
-After that, the things that make it safe to change and easy to debug:
+That way everything about one feature lives in one place. A new developer can open one folder and understand it, and a feature can be changed or removed without touching the others. I'd also make the code more object-oriented:
 
-- **Migrations**: real schema migrations with Alembic instead of a one-off SQL script.
-- **Tests and CI**: an automated test suite that runs in CI on every pull request.
-- **Logging and errors**: structured logs with request IDs, plus error tracking like Sentry, so I hear about problems before users do.
-- **Health checks**: a readiness check that also verifies the database is reachable.
-- **API basics**: request size limits, a CORS policy and versioned URLs (`/api/v1`).
-- **Database**: a managed MySQL with automatic backups, so losing data isn't something I have to think about at 2 a.m.
+- **Services as classes** with their dependencies passed in, rather than loose functions. That makes them easy to test and mock.
+- **A small base class for services and repositories**, so shared behaviour like pagination and not-found handling is written once.
+- **Explicit types** for inputs and outputs, so mistakes show up before runtime.
+
+Beyond structure, these are the general things I'd put in place before going live:
+
+- **Security**:
+  - Proper secret management.
+  - HTTPS everywhere.
+  - Rate limiting.
+  - Stronger account recovery (a one-time link or code instead of only date of birth).
+  - Short-lived tokens with refresh.
+  - Role-based permissions.
+- **Reliability**: real database migrations, health and readiness checks, and a managed database with automatic backups.
+- **Quality**: automated tests running in a CI pipeline on every pull request, plus linting and type checks.
+- **Observability**: structured logging, metrics and error tracking, so I find out about problems before users do.
+- **API hygiene**: versioned URLs, consistent error formats, request size limits and a clear CORS policy.
+
+None of this changes what the API does. It just makes it easier to grow, safer to change and easier to debug once real users depend on it.
 
 ## AI usage declaration
 
